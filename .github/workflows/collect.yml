@@ -1,0 +1,108 @@
+name: 로이킴 공연일 인구 수집
+
+on:
+  schedule:
+    - cron: "13 18 20 11 *"
+      timezone: Asia/Seoul
+    - cron: "56 21 20 11 *"
+      timezone: Asia/Seoul
+    - cron: "13 16 21 11 *"
+      timezone: Asia/Seoul
+    - cron: "56 19 21 11 *"
+      timezone: Asia/Seoul
+    - cron: "13 15 22 11 *"
+      timezone: Asia/Seoul
+    - cron: "56 18 22 11 *"
+      timezone: Asia/Seoul
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 실행 작업
+        type: choice
+        default: check
+        options:
+          - check
+          - sample
+          - report
+          - nov20-early
+          - nov20-late
+          - nov21-early
+          - nov21-late
+          - nov22-early
+          - nov22-late
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 285
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: 수집 구간 결정
+        id: plan
+        env:
+          RUN_CRON: ${{ github.event.schedule }}
+          RUN_REQUEST: ${{ inputs.action }}
+        run: python collector.py plan
+      - name: 공개 샘플 조회
+        if: steps.plan.outputs.mode == 'sample'
+        run: python collector.py sample
+      - name: 올림픽공원 인증 조회
+        if: steps.plan.outputs.mode == 'check'
+        env:
+          SEOUL_POPULATION_API_KEY: ${{ secrets.SEOUL_POPULATION_API_KEY }}
+        run: python collector.py check
+      - name: 올림픽공원 인구 수집
+        if: startsWith(steps.plan.outputs.mode, 'collect')
+        env:
+          SEOUL_POPULATION_API_KEY: ${{ secrets.SEOUL_POPULATION_API_KEY }}
+          SEGMENT: ${{ steps.plan.outputs.segment }}
+        run: python collector.py collect --segment "$SEGMENT"
+      - name: 원본 보관
+        if: always() && startsWith(steps.plan.outputs.mode, 'collect')
+        uses: actions/upload-artifact@v6
+        with:
+          name: roykim-raw-${{ steps.plan.outputs.segment }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: raw/*.jsonl
+          if-no-files-found: warn
+          retention-days: 30
+      - name: 이전 수집 파일 받기
+        if: always() && (steps.plan.outputs.mode == 'collect-report' || steps.plan.outputs.mode == 'report')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p archive
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired | not) | select(.name | startswith("roykim-raw-")) | [.workflow_run.id,.name] | @tsv' \
+            > archive/files.tsv
+          while IFS=$'\t' read -r run artifact; do
+            if [[ "$run" != "$GITHUB_RUN_ID" ]]; then
+              gh run download "$run" --repo "$GITHUB_REPOSITORY" --name "$artifact" --dir "archive/$artifact"
+            fi
+          done < archive/files.tsv
+      - name: 회차별 그래프와 집계 생성
+        if: always() && (steps.plan.outputs.mode == 'collect-report' || steps.plan.outputs.mode == 'report')
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+          python -m pip install 'matplotlib==3.9.4'
+          python report.py --input-dir raw --input-dir archive --output report | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: 결과 업로드
+        if: always() && (steps.plan.outputs.mode == 'collect-report' || steps.plan.outputs.mode == 'report')
+        uses: actions/upload-artifact@v6
+        with:
+          name: roykim-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: report/
+          if-no-files-found: error
+          retention-days: 30

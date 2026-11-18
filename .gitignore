@@ -1,0 +1,5 @@
+archive/
+raw/
+report/
+__pycache__/
+.env
