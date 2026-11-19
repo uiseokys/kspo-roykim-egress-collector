@@ -17,6 +17,8 @@ STEP = timedelta(minutes=5)
 HOST = "openapi.seoul.go.kr"
 PARK = "올림픽공원"
 FIELDS = ("PPLTN_TIME", "AREA_PPLTN_MIN", "AREA_PPLTN_MAX")
+REQUEST_TIMEOUT = 25
+RETRY_DELAYS = (0, 10, 20, 30)
 
 
 @dataclass(frozen=True)
@@ -78,7 +80,7 @@ def api_rows(value):
 
 def query(key, place):
     route = f"/{quote(key, safe='')}/json/citydata_ppltn/1/5/{quote(place, safe='')}"
-    connection = http.client.HTTPConnection(HOST, 8088, timeout=12)
+    connection = http.client.HTTPConnection(HOST, 8088, timeout=REQUEST_TIMEOUT)
     try:
         connection.request("GET", route, headers={"Accept": "application/json"})
         response = connection.getresponse()
@@ -116,12 +118,15 @@ def required_key():
 
 
 def safe_query(key, place):
-    try:
-        return query(key, place)
-    except (OSError, ValueError, TypeError, http.client.HTTPException) as error:
-        # Do not emit exception bodies or request URLs, which can contain the key.
-        print(f"서울시 API 실패 ({type(error).__name__})", flush=True)
-        return None
+    for attempt, delay in enumerate(RETRY_DELAYS, start=1):
+        if delay:
+            time.sleep(delay)
+        try:
+            return query(key, place)
+        except (OSError, ValueError, TypeError, http.client.HTTPException) as error:
+            # Exception bodies and request URLs can contain the key.
+            print(f"서울시 API 실패 {attempt}/{len(RETRY_DELAYS)} ({type(error).__name__})", flush=True)
+    return None
 
 
 def collect(name, output):
@@ -137,9 +142,6 @@ def collect(name, output):
     while (now := datetime.now(KST)) < selected.last:
         slot = selected.first + ((now - selected.first) // STEP) * STEP
         record = safe_query(key, PARK)
-        if record is None:
-            time.sleep(12)
-            record = safe_query(key, PARK)
         if record:
             record["show_day"] = selected.show_day
             record["poll_slot_KST"] = slot.isoformat()
