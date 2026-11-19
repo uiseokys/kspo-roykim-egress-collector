@@ -2,6 +2,8 @@ name: 로이킴 공연일 인구 수집
 
 on:
   schedule:
+    - cron: "43 11 19 11 *"
+      timezone: Asia/Seoul
     - cron: "13 18 20 11 *"
       timezone: Asia/Seoul
     - cron: "43 20 20 11 *"
@@ -71,7 +73,7 @@ jobs:
         if: always() && startsWith(steps.plan.outputs.mode, 'collect')
         uses: actions/upload-artifact@v6
         with:
-          name: roykim-raw-${{ steps.plan.outputs.segment }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ steps.plan.outputs.segment == 'rehearsal' && 'roykim-rehearsal-raw' || 'roykim-raw' }}-${{ steps.plan.outputs.segment }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: raw/*.jsonl
           if-no-files-found: warn
           retention-days: 30
@@ -103,7 +105,7 @@ jobs:
         if: always() && (steps.plan.outputs.mode == 'collect-report' || steps.plan.outputs.mode == 'report')
         uses: actions/upload-artifact@v6
         with:
-          name: roykim-report-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ steps.plan.outputs.segment == 'rehearsal' && 'roykim-rehearsal-report' || 'roykim-report' }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: report/
           if-no-files-found: error
           retention-days: 30

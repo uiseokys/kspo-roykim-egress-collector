@@ -41,6 +41,7 @@ def segment(first, last, final=False):
 
 
 SEGMENTS = {
+    "rehearsal": segment("2026-11-19 12:00", "2026-11-19 12:15", True),
     "nov20-early": segment("2026-11-20 18:30", "2026-11-20 23:30"),
     "nov20-late": segment("2026-11-20 21:00", "2026-11-21 02:00", True),
     "nov21-early": segment("2026-11-21 16:30", "2026-11-21 21:30"),
