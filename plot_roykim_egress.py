@@ -19,7 +19,7 @@ from matplotlib.ticker import StrMethodFormatter
 
 KST = ZoneInfo("Asia/Seoul")
 STEP = timedelta(minutes=5)
-REHEARSAL_START = datetime.fromisoformat("2026-11-19 13:00").replace(tzinfo=KST)
+REHEARSAL_START = datetime.fromisoformat("2026-11-19 14:00").replace(tzinfo=KST)
 SHOW_STARTS = tuple(
     datetime.fromisoformat(value).replace(tzinfo=KST)
     for value in ("2026-11-20 20:00", "2026-11-21 18:00", "2026-11-22 17:00")
