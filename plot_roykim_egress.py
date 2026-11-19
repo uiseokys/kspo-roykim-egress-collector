@@ -19,7 +19,6 @@ from matplotlib.ticker import StrMethodFormatter
 
 KST = ZoneInfo("Asia/Seoul")
 STEP = timedelta(minutes=5)
-REHEARSAL_START = datetime.fromisoformat("2026-11-19 14:00").replace(tzinfo=KST)
 SHOW_STARTS = tuple(
     datetime.fromisoformat(value).replace(tzinfo=KST)
     for value in ("2026-11-20 20:00", "2026-11-21 18:00", "2026-11-22 17:00")
@@ -148,8 +147,7 @@ def save_figure(path, series_by_show, show_ends):
                              figsize=(10, 1.4 + 2.9 * len(series_by_show)), layout="constrained")
     fig.suptitle("로이킴 공연일 올림픽공원 인구 변화", fontsize=19, weight="bold", x=.015, ha="left")
     for ax, (show, series) in zip(axes[:, 0], series_by_show.items()):
-        start_label = "리허설 시작" if show == REHEARSAL_START else "공연 시작"
-        ax.set_title(f"{show:%m/%d}  ·  {start_label} {show:%H:%M}  ·  기준시각 {len(series)}개",
+        ax.set_title(f"{show:%m/%d}  ·  공연 시작 {show:%H:%M}  ·  기준시각 {len(series)}개",
                      loc="left", fontsize=12, weight="bold")
         if not series:
             ax.text(.5, .5, "수집 파일에 이 회차 관측이 없습니다", ha="center", va="center",
@@ -166,7 +164,7 @@ def save_figure(path, series_by_show, show_ends):
                     label="범위 중간값" if i == 0 else None)
             if len(run) == 1:
                 ax.vlines(times, lower, upper, color="#3d72cb", linewidth=2)
-        ax.axvline(show, color="#718096", linestyle="--", label=start_label)
+        ax.axvline(show, color="#718096", linestyle="--", label="공연 시작")
         end = show_ends.get(show.date())
         if end:
             ax.axvline(end, color="#ab5632", linestyle="--", label=f"확인된 종료 {end:%H:%M}")

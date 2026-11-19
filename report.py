@@ -6,12 +6,11 @@ from datetime import timedelta
 from pathlib import Path
 
 from collector import DATA_INTERVAL, PARK, SEGMENTS, clock
-from plot_roykim_egress import REHEARSAL_START, SHOW_STARTS, save_figure, save_table
+from plot_roykim_egress import SHOW_STARTS, save_figure, save_table
 
 
 def report(inputs, output):
-    shows = (REHEARSAL_START, *SHOW_STARTS)
-    by_show = {show.date().isoformat(): {} for show in shows}
+    by_show = {show.date().isoformat(): {} for show in SHOW_STARTS}
     for path in inputs:
         with path.open(encoding="utf-8") as file:
             for line in file:
@@ -34,7 +33,7 @@ def report(inputs, output):
              "시간은 KST이며 인구는 올림픽공원 전체 추정치입니다.", "",
              "| 회차 | 받은 고유 기준시각 수 / 기대 기준시각 수(5분 단위) | 첫 기준시각 | 마지막 기준시각 |",
              "|---|---:|---|---|"]
-    for show in shows:
+    for show in SHOW_STARTS:
         day = show.date().isoformat()
         windows = [segment for segment in SEGMENTS.values() if segment.show_day == day]
         first = min(segment.first for segment in windows) - timedelta(minutes=35)
