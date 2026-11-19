@@ -4,15 +4,15 @@ on:
   schedule:
     - cron: "13 18 20 11 *"
       timezone: Asia/Seoul
-    - cron: "56 21 20 11 *"
+    - cron: "43 20 20 11 *"
       timezone: Asia/Seoul
     - cron: "13 16 21 11 *"
       timezone: Asia/Seoul
-    - cron: "56 19 21 11 *"
+    - cron: "43 18 21 11 *"
       timezone: Asia/Seoul
     - cron: "13 15 22 11 *"
       timezone: Asia/Seoul
-    - cron: "56 18 22 11 *"
+    - cron: "43 17 22 11 *"
       timezone: Asia/Seoul
   workflow_dispatch:
     inputs:
@@ -38,7 +38,7 @@ permissions:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 285
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v6
         with:
@@ -49,6 +49,7 @@ jobs:
       - name: 수집 구간 결정
         id: plan
         env:
+          RUN_EVENT: ${{ github.event_name }}
           RUN_CRON: ${{ github.event.schedule }}
           RUN_REQUEST: ${{ inputs.action }}
         run: python collector.py plan

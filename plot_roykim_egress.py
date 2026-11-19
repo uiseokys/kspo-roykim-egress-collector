@@ -97,12 +97,15 @@ def consecutive_runs(series):
     yield series[begin:]
 
 
-def save_table(path, series_by_show, show_ends):
+def save_table(path, series_by_show, show_ends, *, metadata=None):
+    metadata = metadata or {}
     with path.open("w", encoding="utf-8-sig", newline="") as file:
         writer = csv.writer(file)
         writer.writerow(["공연일", "기준시각_KST", "최소인구", "최대인구",
-                         "직전관측_간격_분", "5분_순감소_하한", "5분_순감소_상한", "실제종료_경과분"])
+                         "직전관측_간격_분", "5분_순감소_하한", "5분_순감소_상한", "실제종료_경과분",
+                         "REPLACE_YN", "혼잡도"])
         for show, series in series_by_show.items():
+            show_metadata = metadata.get(show, {})
             previous = None
             for stamp, (lower, upper) in series:
                 gap = (stamp - previous[0]).total_seconds() / 60 if previous else ""
@@ -112,8 +115,10 @@ def save_table(path, series_by_show, show_ends):
                     high_change = previous[1][1] - lower
                 end = show_ends.get(show.date())
                 elapsed = (stamp - end).total_seconds() / 60 if end else ""
+                fields = show_metadata.get(stamp, {})
                 writer.writerow([show.date(), stamp.isoformat(), lower, upper, gap,
-                                 low_change, high_change, elapsed])
+                                 low_change, high_change, elapsed,
+                                 fields.get("REPLACE_YN", ""), fields.get("AREA_CONGEST_LVL", "")])
                 previous = stamp, (lower, upper)
 
 
@@ -164,7 +169,8 @@ def save_figure(path, series_by_show, show_ends):
         if end:
             ax.axvline(end, color="#ab5632", linestyle="--", label=f"확인된 종료 {end:%H:%M}")
         right = max(series[-1][0], end or show, show + STEP * 6) + STEP
-        ax.set_xlim(show - timedelta(minutes=90), right)
+        left = min(show - timedelta(minutes=90), series[0][0] - STEP)
+        ax.set_xlim(left, right)
         ax.xaxis.set_major_locator(mdates.AutoDateLocator(minticks=5, maxticks=11, tz=KST))
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=KST))
         ax.yaxis.set_major_formatter(StrMethodFormatter("{x:,.0f}"))
