@@ -1,0 +1,243 @@
+{
+ "list_total_count": 1,
+ "RESULT": {
+  "RESULT.CODE": "INFO-000",
+  "RESULT.MESSAGE": "정상 처리되었습니다."
+ },
+ "CITYDATA": {
+  "AREA_NM": "광화문·덕수궁",
+  "AREA_CD": "POI009",
+  "LIVE_PPLTN_STTS": [
+   {
+    "AREA_NM": "광화문·덕수궁",
+    "AREA_CD": "POI009",
+    "AREA_CONGEST_LVL": "보통",
+    "AREA_CONGEST_MSG": "사람이 몰려있을 수 있지만 크게 붐비지는 않아요. 도보 이동에 큰 제약이 없어요.",
+    "AREA_PPLTN_MIN": "52000",
+    "AREA_PPLTN_MAX": "54000",
+    "MALE_PPLTN_RATE": "48.7",
+    "FEMALE_PPLTN_RATE": "51.3",
+    "PPLTN_RATE_0": "0.2",
+    "PPLTN_RATE_10": "2.6",
+    "PPLTN_RATE_20": "14.7",
+    "PPLTN_RATE_30": "24.2",
+    "PPLTN_RATE_40": "25.4",
+    "PPLTN_RATE_50": "19.6",
+    "PPLTN_RATE_60": "8.6",
+    "PPLTN_RATE_70": "4.5",
+    "RESNT_PPLTN_RATE": "44.3",
+    "NON_RESNT_PPLTN_RATE": "55.7",
+    "REPLACE_YN": "N",
+    "PPLTN_TIME": "2026-11-26 13:40",
+    "FCST_YN": "Y",
+    "FCST_PPLTN": [
+     {
+      "FCST_TIME": "2026-11-26 15:00",
+      "FCST_CONGEST_LVL": "붐빔",
+      "FCST_PPLTN_MIN": "52000",
+      "FCST_PPLTN_MAX": "54000"
+     },
+     {
+      "FCST_TIME": "2026-11-26 16:00",
+      "FCST_CONGEST_LVL": "붐빔",
+      "FCST_PPLTN_MIN": "50000",
+      "FCST_PPLTN_MAX": "52000"
+     },
+     {
+      "FCST_TIME": "2026-11-26 17:00",
+      "FCST_CONGEST_LVL": "붐빔",
+      "FCST_PPLTN_MIN": "48000",
+      "FCST_PPLTN_MAX": "50000"
+     },
+     {
+      "FCST_TIME": "2026-11-26 18:00",
+      "FCST_CONGEST_LVL": "약간 붐빔",
+      "FCST_PPLTN_MIN": "44000",
+      "FCST_PPLTN_MAX": "46000"
+     },
+     {
+      "FCST_TIME": "2026-11-26 19:00",
+      "FCST_CONGEST_LVL": "약간 붐빔",
+      "FCST_PPLTN_MIN": "44000",
+      "FCST_PPLTN_MAX": "46000"
+     },
+     {
+      "FCST_TIME": "2026-11-26 20:00",
+      "FCST_CONGEST_LVL": "보통",
+      "FCST_PPLTN_MIN": "30000",
+      "FCST_PPLTN_MAX": "32000"
+     },
+     {
+      "FCST_TIME": "2026-11-26 21:00",
+      "FCST_CONGEST_LVL": "여유",
+      "FCST_PPLTN_MIN": "22000",
+      "FCST_PPLTN_MAX": "24000"
+     },
+     {
+      "FCST_TIME": "2026-11-26 22:00",
+      "FCST_CONGEST_LVL": "여유",
+      "FCST_PPLTN_MIN": "16000",
+      "FCST_PPLTN_MAX": "18000"
+     },
+     {
+      "FCST_TIME": "2026-11-26 23:00",
+      "FCST_CONGEST_LVL": "여유",
+      "FCST_PPLTN_MIN": "10000",
+      "FCST_PPLTN_MAX": "12000"
+     },
+     {
+      "FCST_TIME": "2026-11-27 00:00",
+      "FCST_CONGEST_LVL": "여유",
+      "FCST_PPLTN_MIN": "6000",
+      "FCST_PPLTN_MAX": "6500"
+     },
+     {
+      "FCST_TIME": "2026-11-27 01:00",
+      "FCST_CONGEST_LVL": "여유",
+      "FCST_PPLTN_MIN": "4000",
+      "FCST_PPLTN_MAX": "4500"
+     },
+     {
+      "FCST_TIME": "2026-11-27 02:00",
+      "FCST_CONGEST_LVL": "여유",
+      "FCST_PPLTN_MIN": "3500",
+      "FCST_PPLTN_MAX": "4000"
+     }
+    ]
+   }
+  ],
+  "ROAD_TRAFFIC_STTS": {
+   "AVG_ROAD_DATA": {
+    "ROAD_MSG": "해당 장소로 이동·진입시 시간이 오래 걸릴 수 있어요.",
+    "ROAD_TRAFFIC_IDX": "정체",
+    "ROAD_TRAFFIC_SPD": 14,
+    "ROAD_TRAFFIC_TIME": "2026-11-26 14:10"
+   }
+  },
+  "PRK_STTS": [
+   {
+    "PRK_NM": "세종로 공영주차장(시)",
+    "PRK_CD": "171721",
+    "PRK_TYPE": "NW",
+    "CPCTY": "1260",
+    "CUR_PRK_CNT": "735",
+    "CUR_PRK_TIME": "2026-11-26 14:08:43",
+    "CUR_PRK_YN": "Y",
+    "PAY_YN": "Y",
+    "RATES": "430",
+    "TIME_RATES": null,
+    "ADD_RATES": "430",
+    "ADD_TIME_RATES": null,
+    "ADDRESS": "종로구 세종로 80-1",
+    "ROAD_ADDR": "종로구 세종대로 189",
+    "LNG": "126.97588429",
+    "LAT": "37.57340269"
+   },
+   {
+    "PRK_NM": "백영북창빌딩",
+    "PRK_CD": "3202173",
+    "PRK_TYPE": "BS",
+    "CPCTY": "24",
+    "CUR_PRK_CNT": "",
+    "CUR_PRK_TIME": "",
+    "CUR_PRK_YN": "N",
+    "PAY_YN": "Y",
+    "RATES": "2000",
+    "TIME_RATES": "30",
+    "ADD_RATES": "1000",
+    "ADD_TIME_RATES": "10",
+    "ADDRESS": "중구 북창동 18-9",
+    "ROAD_ADDR": "",
+    "LNG": "126.977556",
+    "LAT": "37.562981"
+   }
+  ],
+  "LIVE_SUB_PPLTN": {
+   "SUB_ACML_GTON_PPLTN_MIN": "23700",
+   "SUB_ACML_GTON_PPLTN_MAX": "23800",
+   "SUB_ACML_GTOFF_PPLTN_MIN": "115100",
+   "SUB_ACML_GTOFF_PPLTN_MAX": "115200",
+   "SUB_30WTHN_GTON_PPLTN_MIN": "2900",
+   "SUB_30WTHN_GTON_PPLTN_MAX": "3000",
+   "SUB_30WTHN_GTOFF_PPLTN_MIN": "3100",
+   "SUB_30WTHN_GTOFF_PPLTN_MAX": "3200",
+   "SUB_10WTHN_GTON_PPLTN_MIN": "900",
+   "SUB_10WTHN_GTON_PPLTN_MAX": "950",
+   "SUB_10WTHN_GTOFF_PPLTN_MIN": "950",
+   "SUB_10WTHN_GTOFF_PPLTN_MAX": "1000",
+   "SUB_5WTHN_GTON_PPLTN_MIN": "300",
+   "SUB_5WTHN_GTON_PPLTN_MAX": "350",
+   "SUB_5WTHN_GTOFF_PPLTN_MIN": "400",
+   "SUB_5WTHN_GTOFF_PPLTN_MAX": "450",
+   "SUB_STN_CNT": "4",
+   "SUB_STN_TIME": "20261126"
+  },
+  "LIVE_BUS_PPLTN": {
+   "BUS_ACML_GTON_PPLTN_MIN": "11500",
+   "BUS_ACML_GTON_PPLTN_MAX": "11600",
+   "BUS_ACML_GTOFF_PPLTN_MIN": "19200",
+   "BUS_ACML_GTOFF_PPLTN_MAX": "19300",
+   "BUS_30WTHN_GTON_PPLTN_MIN": "1200",
+   "BUS_30WTHN_GTON_PPLTN_MAX": "1300",
+   "BUS_30WTHN_GTOFF_PPLTN_MIN": "950",
+   "BUS_30WTHN_GTOFF_PPLTN_MAX": "1000",
+   "BUS_10WTHN_GTON_PPLTN_MIN": "300",
+   "BUS_10WTHN_GTON_PPLTN_MAX": "350",
+   "BUS_10WTHN_GTOFF_PPLTN_MIN": "250",
+   "BUS_10WTHN_GTOFF_PPLTN_MAX": "300",
+   "BUS_5WTHN_GTON_PPLTN_MIN": "150",
+   "BUS_5WTHN_GTON_PPLTN_MAX": "200",
+   "BUS_5WTHN_GTOFF_PPLTN_MIN": "100",
+   "BUS_5WTHN_GTOFF_PPLTN_MAX": "150",
+   "BUS_STN_CNT": "41",
+   "BUS_STN_TIME": "20261126"
+  },
+  "SBIKE_STTS": [
+   {
+    "SBIKE_SPOT_NM": "468.웨스틴 조선호텔",
+    "SBIKE_SPOT_ID": "ST-1774",
+    "SBIKE_SHARED": "50",
+    "SBIKE_PARKING_CNT": "4",
+    "SBIKE_RACK_CNT": "8",
+    "SBIKE_X": 126.9787674,
+    "SBIKE_Y": 37.56441879
+   },
+   {
+    "SBIKE_SPOT_NM": "305. 종로구청 옆",
+    "SBIKE_SPOT_ID": "ST-121",
+    "SBIKE_SHARED": "213",
+    "SBIKE_PARKING_CNT": "34",
+    "SBIKE_RACK_CNT": "16",
+    "SBIKE_X": 126.97833252,
+    "SBIKE_Y": 37.57255936
+   }
+  ],
+  "WEATHER_STTS": [
+   {
+    "WEATHER_TIME": "2026-11-26 14:10",
+    "TEMP": "13.3",
+    "MAX_TEMP": "16.0",
+    "MIN_TEMP": "9.0",
+    "HUMIDITY": "62",
+    "WIND_DIRCT": "E",
+    "WIND_SPD": "4.0",
+    "PRECIPITATION": "-",
+    "PRECPT_TYPE": "없음",
+    "PCP_MSG": "비 또는 눈 소식이 없어요.",
+    "SUNRISE": "07:23",
+    "SUNSET": "17:15",
+    "UV_INDEX_LVL": "낮음",
+    "UV_INDEX": "2",
+    "UV_MSG": "햇볕에 민감한 분들은 자외선 차단제를 발라주세요.",
+    "PM25_INDEX": "좋음",
+    "PM25": "15",
+    "PM10_INDEX": "보통",
+    "PM10": "43",
+    "AIR_IDX": "보통",
+    "AIR_IDX_MVL": "57.0",
+    "AIR_IDX_MAIN": "",
+    "AIR_MSG": "호흡기가 예민하신 분들은 몸상태 유의하며 활동해주세요."
+   }
+  ]
+ }
+}
