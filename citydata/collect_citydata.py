@@ -8,6 +8,10 @@
   python3 citydata/collect_citydata.py collect --segment 1127_조용필-A --push
   python3 citydata/collect_citydata.py check                      # 올림픽공원을 한 번 조회해 항목이 채워지는지 확인
   python3 citydata/collect_citydata.py test --minutes 5 --push    # 짧게 수집해 저장까지 확인
+  python3 citydata/collect_citydata.py wait                       # 다음 구간까지 기다렸다가 다음 실행 요청(arm용)
+
+이어 가기: 앞 구간(A)을 수집하는 실행이 뒤 구간(B) 시작 30분 전에 다음 실행을 스스로 요청합니다. 그래서 하루에 한 번만 시작시키면 됩니다.
+Run workflow에서 arm을 고르면 구간 밖에서도 다음 구간까지 기다렸다가 수집하고, 사흘 공연이 끝날 때까지 스스로 이어 갑니다.
 
 인증키는 환경변수 SEOUL_POPULATION_API_KEY에서만 읽고, 파일이나 로그에 남기지 않습니다.
 
@@ -42,6 +46,9 @@ KEY_NAME = "SEOUL_POPULATION_API_KEY"
 INTERVAL = 120  # 호출 간격(초). 자료는 약 5분마다 바뀝니다
 SAVE_EVERY = timedelta(minutes=20)  # 이 간격마다 저장소에 올려, 작업이 중간에 끊겨도 자료가 남게 합니다
 PLAN_EARLY = timedelta(minutes=45)  # 구간 시작보다 이만큼 일찍 실행돼도 그 구간을 고르고 바로 수집을 시작합니다
+WORKFLOW = "collect-citydata.yml"
+HANDOFF_EARLY = timedelta(minutes=30)  # 앞 구간이 뒤 구간 시작 이만큼 전에 뒤 구간 실행을 요청합니다
+RELAY_MAX = timedelta(hours=5)  # 대기 작업 하나가 기다리는 최대 시간(작업 제한 6시간보다 짧게). 더 멀면 다음 대기 작업에 넘깁니다
 
 # 공연 시작 시각(KST). 구간 A는 시작 1시간 전~시작 3시간 30분 뒤, 구간 B는 시작 2시간 30분 뒤~6시간 뒤(1시간 겹침).
 SHOWS = {"1127_조용필": "2026-11-27 19:00", "1128_조용필": "2026-11-28 18:00", "1129_조용필": "2026-11-29 17:00"}
@@ -66,14 +73,47 @@ def segments() -> dict[str, tuple[datetime, datetime, str]]:
     return out
 
 
+def upcoming(now: datetime) -> datetime | None:
+    """아직 수집을 시작할 수 없는 구간 가운데 가장 가까운 것의 시작 시각."""
+    starts = sorted(first for first, _, _ in segments().values() if first - PLAN_EARLY > now)
+    return starts[0] if starts else None
+
+
 def plan(request: str, now: datetime) -> tuple[str, str]:
-    """(할 일, 구간). 할 일: collect·check·test·idle. 예약 실행이 구간 밖에서 돌면 idle(실패가 아님)."""
+    """(할 일, 구간). 할 일: collect·wait·check·test·idle.
+    예약 실행이 구간 밖에서 돌면 idle(실패가 아님). arm으로 실행하면 구간 밖일 때 다음 구간까지 기다리는 wait."""
     if request in ("check", "test"):
         return request, ""
     eligible = [name for name, (first, last, _) in segments().items() if first - PLAN_EARLY <= now < last]
-    if not eligible:
-        return "idle", ""
-    return "collect", max(eligible, key=lambda name: segments()[name][0])
+    if eligible:
+        return "collect", max(eligible, key=lambda name: segments()[name][0])
+    return ("wait", "") if request == "arm" and upcoming(now) else ("idle", "")
+
+
+def handoff_for(name: str, relay: bool) -> tuple[tuple[datetime, str] | None, str | None]:
+    """이 구간을 수집하는 실행이 다음 실행을 언제·어떻게 요청할지: (수집 도중 요청 (시각, 요청), 수집이 끝난 뒤 요청).
+    - 뒤 구간과 겹치는 앞 구간(A)은 뒤 구간 시작 30분 전에 요청해 빈틈 없이 이어 줍니다(항상).
+    - 그날 마지막 구간(B)은 arm으로 이어 온 경우에만, 끝난 뒤 다음 공연일을 기다리는 실행을 요청합니다."""
+    first, last, _ = segments()[name]
+    later = sorted(start for start, _, _ in segments().values() if start > first)
+    if later and later[0] < last:
+        return (later[0] - HANDOFF_EARLY, "arm" if relay else "auto"), None
+    return None, ("arm" if relay and later else None)
+
+
+def dispatch(request: str) -> bool:
+    """이 워크플로를 다시 실행하도록 요청합니다(Actions 안에서만. GH_TOKEN과 actions: write 권한 필요)."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        log(f"다음 실행 요청은 Actions에서만 합니다(요청: {request})")
+        return False
+    for attempt in range(3):
+        done = subprocess.run(["gh", "workflow", "run", WORKFLOW, "--ref", "main", "-f", f"action={request}"], cwd=ROOT, capture_output=True)
+        if done.returncode == 0:
+            log(f"다음 실행을 요청함: {request}")
+            return True
+        time.sleep(10 * (attempt + 1))
+    log(f"다음 실행 요청 실패: {request} (직접 Run workflow를 눌러 주세요)")
+    return False
 
 
 # ---------------------------------------------------------------- 응답 다루기
@@ -242,8 +282,10 @@ def save_to_repo(paths: list[Path], note: str) -> bool:
     return False
 
 
-def run(key: str, label: str, name: str, until: datetime, interval: int = INTERVAL, push: bool = False, full_dir: Path | None = None) -> int:
-    """until까지 interval초마다 조회해 OUT_DIR/<label>/<name>.csv·.jsonl에 쌓습니다. 성공한 조회가 있고 저장도 됐으면 0."""
+def run(key: str, label: str, name: str, until: datetime, interval: int = INTERVAL, push: bool = False, full_dir: Path | None = None,
+        handoff: tuple[datetime, str] | None = None) -> int:
+    """until까지 interval초마다 조회해 OUT_DIR/<label>/<name>.csv·.jsonl에 쌓습니다. 성공한 조회가 있고 저장도 됐으면 0.
+    handoff (시각, 요청)를 주면 그 시각이 됐을 때 다음 실행을 한 번 요청합니다."""
     folder = OUT_DIR / label
     folder.mkdir(parents=True, exist_ok=True)
     csv_path, jsonl_path = folder / f"{name}.csv", folder / f"{name}.jsonl"
@@ -256,6 +298,9 @@ def run(key: str, label: str, name: str, until: datetime, interval: int = INTERV
     saved, last_save = True, now_kst()
     while now_kst() < until:
         fetched_at = now_kst()
+        if handoff and fetched_at >= handoff[0]:
+            dispatch(handoff[1])
+            handoff = None
         try:
             data = fetch(key)
             row = to_row(data, fetched_at)
@@ -307,7 +352,7 @@ def _key() -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="조용필 공연일 올림픽공원 도시데이터 전체 항목 수집")
-    parser.add_argument("action", choices=("plan", "collect", "check", "test"))
+    parser.add_argument("action", choices=("plan", "collect", "wait", "check", "test"))
     parser.add_argument("--segment", choices=sorted(segments()))
     parser.add_argument("--minutes", type=int, default=5, help="test: 수집할 시간(분)")
     parser.add_argument("--push", action="store_true", help="수집 파일을 저장소 main에 올림(Actions용)")
@@ -326,7 +371,19 @@ def main() -> int:
         log(f"채워진 열 {sum(1 for v in row.values() if v != '')}/{len(FIELDS)}")
         return 0 if row["status"] == "ok" else 1
     if args.action == "test":
-        return run(_key(), f"{now_kst():%m%d}_test", f"test-{run_name}", now_kst() + timedelta(minutes=args.minutes), 60, args.push, args.full_dir)
+        code = run(_key(), f"{now_kst():%m%d}_test", f"test-{run_name}", now_kst() + timedelta(minutes=args.minutes), 60, args.push, args.full_dir)
+        dispatch("check")  # 다음 실행을 요청하는 길도 함께 시험(check 실행이 하나 더 생기면 됨)
+        return code
+    relay = os.environ.get("RUN_REQUEST") == "arm"  # arm으로 시작한 실행은 사흘 공연이 끝날 때까지 스스로 이어 감
+    if args.action == "wait":
+        target = upcoming(now_kst())
+        if target is None:
+            log("남은 수집 구간이 없습니다. 끝.")
+            return 0
+        pause = min(target - PLAN_EARLY + timedelta(minutes=1) - now_kst(), RELAY_MAX)
+        log(f"다음 구간({target:%m/%d %H:%M} 시작)을 기다립니다: {max(0, int(pause.total_seconds() // 60))}분 뒤 다음 실행 요청")
+        time.sleep(max(0, pause.total_seconds()))
+        return 0 if dispatch("arm") else 1
     if args.segment is None:
         parser.error("collect에는 --segment가 필요합니다.")
     first, last, label = segments()[args.segment]
@@ -337,8 +394,11 @@ def main() -> int:
     if now < first - PLAN_EARLY:
         log(f"{args.segment} 구간은 아직 멀었습니다({first:%m/%d %H:%M} 시작). 할 일 없음.")
         return 0
-    _output(folder=str((OUT_DIR / label).relative_to(ROOT)))
-    return run(_key(), label, f"{args.segment.rsplit('-', 1)[1]}-{run_name}", last, INTERVAL, args.push, args.full_dir)
+    during, after = handoff_for(args.segment, relay)
+    code = run(_key(), label, f"{args.segment.rsplit('-', 1)[1]}-{run_name}", last, INTERVAL, args.push, args.full_dir, during)
+    if after:
+        dispatch(after)
+    return code
 
 
 if __name__ == "__main__":

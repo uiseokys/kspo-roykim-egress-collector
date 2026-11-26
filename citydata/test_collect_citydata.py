@@ -76,6 +76,42 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(cc.plan("", kst("2026-11-28 01:00")), ("idle", ""))
         self.assertEqual(cc.plan("auto", kst("2026-11-29 16:30")), ("collect", "1129_조용필-A"))
         self.assertEqual(cc.plan("check", kst("2026-11-27 20:00")), ("check", ""))
+        # arm: 구간 밖이면 다음 구간을 기다리고, 구간 안이면 바로 수집, 마지막 구간이 끝난 뒤에는 멈춤
+        self.assertEqual(cc.plan("arm", kst("2026-11-26 21:00")), ("wait", ""))
+        self.assertEqual(cc.plan("arm", kst("2026-11-28 03:00")), ("wait", ""))
+        self.assertEqual(cc.plan("arm", kst("2026-11-27 17:30")), ("collect", "1127_조용필-A"))
+        self.assertEqual(cc.plan("arm", kst("2026-11-29 23:30")), ("idle", ""))
+        self.assertEqual(cc.plan("", kst("2026-11-26 21:00")), ("idle", ""))  # 예약 실행은 기다리지 않음
+
+    def test_handoff_keeps_the_day_covered_with_one_start(self):
+        # 앞 구간은 뒤 구간 시작 30분 전에 다음 실행을 요청하고, 그때 고르는 구간이 뒤 구간이어야 함
+        for label in cc.SHOWS:
+            during, after = cc.handoff_for(f"{label}-A", relay=False)
+            self.assertEqual((during[1], after), ("auto", None))
+            self.assertEqual(cc.plan(during[1], during[0] + timedelta(minutes=3)), ("collect", f"{label}-B"))
+            self.assertLess(during[0], cc.segments()[f"{label}-A"][1])
+        self.assertEqual(cc.handoff_for("1127_조용필-A", relay=False)[0][0], kst("2026-11-27 21:00"))
+        # 그날 마지막 구간은 arm일 때만 다음 공연일을 기다리는 실행을 요청하고, 마지막 날에는 멈춤
+        self.assertEqual(cc.handoff_for("1127_조용필-B", relay=False), (None, None))
+        self.assertEqual(cc.handoff_for("1127_조용필-B", relay=True), (None, "arm"))
+        self.assertEqual(cc.handoff_for("1127_조용필-A", relay=True)[0][1], "arm")
+        self.assertEqual(cc.handoff_for("1129_조용필-B", relay=True), (None, None))
+
+    def test_wait_chain_reaches_every_window(self):
+        # arm을 전날 밤에 눌렀을 때: 5시간씩 기다리며 이어 가도 각 구간이 시작하기 전에 수집을 고름
+        now, picked = kst("2026-11-26 21:10"), []
+        for _ in range(60):
+            mode, name = cc.plan("arm", now)
+            if mode == "wait":
+                now += min(cc.upcoming(now) - cc.PLAN_EARLY + timedelta(minutes=1) - now, cc.RELAY_MAX) + timedelta(minutes=2)
+            elif mode == "collect":
+                picked.append((name, now <= cc.segments()[name][0]))
+                during, after = cc.handoff_for(name, relay=True)
+                now = during[0] + timedelta(minutes=2) if during else cc.segments()[name][1] + timedelta(minutes=2)
+            else:
+                break
+        self.assertEqual([p[0] for p in picked], sorted(cc.segments()))
+        self.assertTrue(all(early for name, early in picked if name.endswith("-A")))  # 앞 구간은 공연 1시간 전보다 먼저 시작
         self.assertEqual(cc.plan("test", kst("2026-11-26 15:00")), ("test", ""))
 
     def test_crons_cover_every_window_even_if_eight_hours_late(self):
@@ -107,8 +143,11 @@ class RunTest(unittest.TestCase):
             start = cc.now_kst()
             ticks = iter(start + timedelta(seconds=5 * i) for i in range(1000))
             with mock.patch.object(cc, "now_kst", side_effect=lambda: next(ticks)):
-                code = cc.run("secret-key", "t", "A-1", start + timedelta(minutes=2), 120, full_dir=Path(tmp) / "full")
+                with mock.patch.object(cc, "dispatch") as asked:
+                    code = cc.run("secret-key", "t", "A-1", start + timedelta(minutes=2), 120, full_dir=Path(tmp) / "full",
+                                  handoff=(start + timedelta(seconds=30), "auto"))
             self.assertEqual(code, 0)
+            asked.assert_called_once_with("auto")  # 정한 시각이 지나면 다음 실행을 한 번만 요청
             body = (Path(tmp) / "data/t/A-1.csv").read_text(encoding="utf-8")
             self.assertGreaterEqual(len(body.splitlines()), 3)
             self.assertIn("error: RuntimeError", body)
