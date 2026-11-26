@@ -198,9 +198,11 @@ def trim(data: dict) -> dict:
 
 
 def describe(row: dict) -> str:
-    return (f"{row['ppltn_time']} 인구 {row['ppltn_min']}~{row['ppltn_max']} · 지하철 5분 승차 {row['sub_on_5_min']}~{row['sub_on_5_max']}"
-            f"(역 {row['sub_stn_cnt'] or '-'}곳) · 버스 5분 승차 {row['bus_on_5_min']}~{row['bus_on_5_max']}"
-            f" · 주차 {row['prk_current'] or '-'}/{row['prk_capacity'] or '-'}({row['prk_lots'] or 0}곳)")
+    def span(name):  # 값이 비어 있으면(올림픽공원은 지하철·주차장 실시간 값이 비어 있을 때가 있음) '없음'
+        low, high = row[f"{name}_min"], row[f"{name}_max"]
+        return "없음" if low in ("", None) else f"{low}~{high}"
+    return (f"{row['ppltn_time']} 인구 {span('ppltn')} · 지하철 5분 승차 {span('sub_on_5')} · 버스 5분 승차 {span('bus_on_5')}"
+            f" · 주차 {row['prk_current'] if row['prk_lots'] else '없음'} · 따릉이 {row['bike_parked'] if row['bike_spots'] else '없음'}대")
 
 
 # ---------------------------------------------------------------- 저장
