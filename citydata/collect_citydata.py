@@ -55,6 +55,7 @@ RELAY_MAX = timedelta(hours=5)  # 대기 작업 하나가 기다리는 최대 �
 SHOWS = {"1127_조용필": "2026-11-27 19:00", "1128_조용필": "2026-11-28 18:00", "1129_조용필": "2026-11-29 17:00"}
 PARTS = {"A": (-60, 210), "B": (150, 360)}
 # 공연 구간 사이의 빈 시간도 모읍니다: 이 시각부터 마지막 공연 구간이 끝날 때(11/29 23:00)까지 끊기지 않게 구간을 잇습니다.
+SURVEY = ["올림픽공원", "잠실종합운동장", "잠실 관광특구", "강남역", "고척돔", "여의도", "광화문·덕수궁", "서울역", "김포공항"]  # survey로 비교할 장소
 FILL_FROM = "2026-11-27 14:00"
 FILL_STEP = timedelta(hours=4, minutes=30)  # 빈 시간을 메우는 구간 하나의 최대 길이(작업 제한 시간 안에 들게)
 FILL_OVERLAP = timedelta(minutes=5)  # 이웃한 구간과 겹치는 시간
@@ -108,7 +109,7 @@ def upcoming(now: datetime) -> datetime | None:
 def plan(request: str, now: datetime) -> tuple[str, str]:
     """(할 일, 구간). 할 일: collect·wait·check·test·idle.
     예약 실행이 구간 밖에서 돌면 idle(실패가 아님). arm으로 실행하면 구간 밖일 때 다음 구간까지 기다리는 wait."""
-    if request in ("check", "test"):
+    if request in ("check", "test", "survey"):
         return request, ""
     eligible = [name for name, (first, last, _) in segments().items() if first - PLAN_EARLY <= now < last]
     if eligible:
@@ -378,7 +379,7 @@ def _key() -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="조용필 공연일 올림픽공원 도시데이터 전체 항목 수집")
-    parser.add_argument("action", choices=("plan", "collect", "wait", "check", "test"))
+    parser.add_argument("action", choices=("plan", "collect", "wait", "check", "test", "survey"))
     parser.add_argument("--segment", choices=sorted(segments()))
     parser.add_argument("--minutes", type=int, default=5, help="test: 수집할 시간(분)")
     parser.add_argument("--push", action="store_true", help="수집 파일을 저장소 main에 올림(Actions용)")
@@ -399,6 +400,20 @@ def main() -> int:
         log(f"올림픽공원 조회 {row['status']} ({row['result_code']}) · {describe(row)}")
         log(f"채워진 열 {sum(1 for v in row.values() if v != '')}/{len(FIELDS)}")
         return 0 if row["status"] == "ok" else 1
+    if args.action == "survey":  # 지하철 실시간 승하차가 다른 장소에서는 채워지는지 한 번씩 조회해 로그로 비교
+        key = _key()
+        for area in SURVEY:
+            try:
+                city = _city(fetch(key, area))
+            except RuntimeError as exc:
+                log(f"{area}: 조회 실패 ({exc})")
+                continue
+            row = to_row({"CITYDATA": city}, now_kst())
+            stations = [f"{s.get('SUB_STN_NM')}({s.get('SUB_STN_LINE')})" for s in city.get("SUB_STTS") or [] if isinstance(s, dict)]
+            ride = "없음" if row["sub_on_5_min"] in ("", None) else f"{row['sub_on_5_min']}~{row['sub_on_5_max']}"
+            log(f"{area}: 지하철 5분 승차 {ride} · 기준 {row['sub_time'] or '없음'} · 역 수 {row['sub_stn_cnt'] or '없음'} · 주변 역 {', '.join(stations) or '없음'}"
+                f" · 버스 5분 승차 {row['bus_on_5_min'] or '없음'} · 인구 {row['ppltn_min'] or '없음'}")
+        return 0
     if args.action == "test":
         code = run(_key(), f"{now_kst():%m%d}_test", f"test-{run_name}", now_kst() + timedelta(minutes=args.minutes), 60, args.push, args.full_dir)
         dispatch("check")  # 다음 실행을 요청하는 길도 함께 시험(check 실행이 하나 더 생기면 됨)

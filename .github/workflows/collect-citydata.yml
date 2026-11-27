@@ -20,6 +20,7 @@ on:
           - arm
           - check
           - test
+          - survey   # 여러 장소의 지하철 실시간 승하차가 채워지는지 한 번씩 조회해 로그로 비교
 
 permissions:
   contents: write
@@ -72,6 +73,7 @@ jobs:
         run: |
           case "$MODE" in
             check) python3 citydata/collect_citydata.py check ;;
+            survey) python3 citydata/collect_citydata.py survey ;;
             test) python3 citydata/collect_citydata.py test --minutes 5 --push --full-dir "$FULL_DIR" ;;
             collect) python3 citydata/collect_citydata.py collect --segment "$SEGMENT" --push --full-dir "$FULL_DIR" ;;
             wait) python3 citydata/collect_citydata.py wait ;;
