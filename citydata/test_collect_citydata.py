@@ -227,6 +227,26 @@ class RunTest(unittest.TestCase):
             self.assertNotIn("secret-key", body)
             self.assertFalse((Path(tmp) / "t/x.jamsil.jsonl").exists())
 
+    def test_extra_only_run_collects_just_the_extra_area(self):
+        self.assertEqual(cc.plan("extra", kst("2026-11-27 15:00")), ("extra", ""))
+        seen = []
+
+        def fake_fetch(key, area=cc.AREA, **options):
+            seen.append(area)
+            return SAMPLE
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(cc, "OUT_DIR", Path(tmp)), mock.patch.object(cc, "ROOT", Path(tmp)), \
+                mock.patch.object(cc, "fetch", side_effect=fake_fetch), mock.patch.object(cc.time, "sleep"), mock.patch.object(cc, "save_to_repo", return_value=True) as saving:
+            start = cc.now_kst()
+            ticks = (start + timedelta(minutes=2 * i) for i in range(1000))
+            with mock.patch.object(cc, "now_kst", side_effect=lambda: next(ticks)):
+                self.assertEqual(cc.run_extra("secret-key", "t", "P1-9", start + timedelta(minutes=40), push=True), 0)
+            self.assertEqual(set(seen), set(cc.EXTRA_AREAS))  # 올림픽공원은 조회하지 않음
+            self.assertEqual(len((Path(tmp) / "t/P1-9.jamsil.csv").read_text(encoding="utf-8").splitlines()) - 1, len(seen))
+            self.assertFalse((Path(tmp) / "t/P1-9.csv").exists())
+            self.assertIn("진행 중", saving.call_args_list[0].args[1])  # 첫 조회 직후 바로 저장
+            self.assertGreaterEqual(saving.call_count, 2)
+
     def test_empty_response_cannot_count_as_success(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(cc, "OUT_DIR", Path(tmp)), mock.patch.object(cc, "ROOT", Path(tmp)), \
                 mock.patch.object(cc, "fetch", return_value={}), mock.patch.object(cc.time, "sleep"):

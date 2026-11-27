@@ -21,6 +21,7 @@ on:
           - check
           - test
           - survey   # 여러 장소의 지하철 실시간 승하차가 채워지는지 한 번씩 조회해 로그로 비교
+          - extra    # 잠실 관광특구(지하철 실시간 승하차)만 지금 구간이 끝날 때까지 따로 수집
 
 permissions:
   contents: write
@@ -74,6 +75,7 @@ jobs:
           case "$MODE" in
             check) python3 citydata/collect_citydata.py check ;;
             survey) python3 citydata/collect_citydata.py survey ;;
+            extra) python3 citydata/collect_citydata.py extra --push ;;
             test) python3 citydata/collect_citydata.py test --minutes 5 --push --full-dir "$FULL_DIR" ;;
             collect) python3 citydata/collect_citydata.py collect --segment "$SEGMENT" --push --full-dir "$FULL_DIR" ;;
             wait) python3 citydata/collect_citydata.py wait ;;

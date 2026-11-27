@@ -9,6 +9,7 @@
   python3 citydata/collect_citydata.py collect --segment 1127_조용필-A --push
   python3 citydata/collect_citydata.py check                      # 올림픽공원을 한 번 조회해 항목이 채워지는지 확인
   python3 citydata/collect_citydata.py test --minutes 5 --push    # 짧게 수집해 저장까지 확인
+  python3 citydata/collect_citydata.py extra --push               # 잠실 관광특구만 지금 구간 끝까지 따로 수집(본 수집이 예전 코드로 돌 때)
   python3 citydata/collect_citydata.py wait                       # 다음 구간까지 기다렸다가 다음 실행 요청(arm용)
 
 이어 가기: 구간을 수집하는 실행이 다음 구간 시작 30분 전에 다음 실행을 스스로 요청합니다. 구간이 모두 이어져 있어 한 번만 시작시키면 끝까지 갑니다.
@@ -110,7 +111,7 @@ def upcoming(now: datetime) -> datetime | None:
 def plan(request: str, now: datetime) -> tuple[str, str]:
     """(할 일, 구간). 할 일: collect·wait·check·test·idle.
     예약 실행이 구간 밖에서 돌면 idle(실패가 아님). arm으로 실행하면 구간 밖일 때 다음 구간까지 기다리는 wait."""
-    if request in ("check", "test", "survey"):
+    if request in ("check", "test", "survey", "extra"):
         return request, ""
     eligible = [name for name, (first, last, _) in segments().items() if first - PLAN_EARLY <= now < last]
     if eligible:
@@ -394,6 +395,31 @@ def run(key: str, label: str, name: str, until: datetime, interval: int = INTERV
     return 0 if ok > 0 and saved else 1
 
 
+def run_extra(key: str, label: str, name: str, until: datetime, push: bool = False) -> int:
+    """함께 모으는 장소(EXTRA_AREAS)만 until까지 EXTRA_EVERY마다 조회합니다. 올림픽공원 수집과 따로 도는 실행용입니다.
+    파일 이름은 본 수집과 같은 꼴(<name>.<말>.csv·.jsonl)이고, 첫 조회 직후와 그 뒤 SAVE_EVERY마다 저장소에 올립니다."""
+    folder = OUT_DIR / label
+    folder.mkdir(parents=True, exist_ok=True)
+    extras = {area: (folder / f"{name}.{tag}.csv", folder / f"{name}.{tag}.jsonl") for area, tag in EXTRA_AREAS.items()}
+    files = [p for pair in extras.values() for p in pair]
+    log(f"따로 수집 시작: {', '.join(extras)} (끝 {until:%m/%d %H:%M}, 간격 {int(EXTRA_EVERY.total_seconds())}초)")
+    saved, last_save = True, None
+    while now_kst() < until:
+        for area, (extra_csv, extra_jsonl) in extras.items():
+            collect_extra(key, area, extra_csv, extra_jsonl, now_kst())
+        if push and (last_save is None or now_kst() - last_save >= SAVE_EVERY):
+            saved = save_to_repo(files, f"수집: {label} {name} 잠실 관광특구 (진행 중)")
+            last_save = now_kst()
+        remaining = (until - now_kst()).total_seconds()
+        if remaining <= 0:
+            break
+        time.sleep(min(EXTRA_EVERY.total_seconds(), remaining))
+    if push:
+        saved = save_to_repo(files, f"수집: {label} {name} 잠실 관광특구")
+        log("저장소에 올림" if saved else "저장소에 올리지 못함")
+    return 0 if saved and any(p.is_file() for p in files) else 1
+
+
 # ---------------------------------------------------------------- 실행
 
 def _output(**values: str) -> None:
@@ -412,7 +438,7 @@ def _key() -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="조용필 공연일 올림픽공원 도시데이터 전체 항목 수집")
-    parser.add_argument("action", choices=("plan", "collect", "wait", "check", "test", "survey"))
+    parser.add_argument("action", choices=("plan", "collect", "wait", "check", "test", "survey", "extra"))
     parser.add_argument("--segment", choices=sorted(segments()))
     parser.add_argument("--minutes", type=int, default=5, help="test: 수집할 시간(분)")
     parser.add_argument("--push", action="store_true", help="수집 파일을 저장소 main에 올림(Actions용)")
@@ -447,6 +473,13 @@ def main() -> int:
             log(f"{area}: 지하철 5분 승차 {ride} · 기준 {row['sub_time'] or '없음'} · 역 수 {row['sub_stn_cnt'] or '없음'} · 주변 역 {', '.join(stations) or '없음'}"
                 f" · 버스 5분 승차 {row['bus_on_5_min'] or '없음'} · 인구 {row['ppltn_min'] or '없음'}")
         return 0
+    if args.action == "extra":  # 본 수집은 건드리지 않고, 함께 모으는 장소만 지금 구간이 끝날 때까지 따로 수집
+        mode, chosen = plan("auto", now_kst())
+        if mode != "collect":
+            log("지금은 수집 구간이 아닙니다. 할 일 없음.")
+            return 0
+        _, last, label = segments()[chosen]
+        return run_extra(_key(), label, f"{chosen.rsplit('-', 1)[1]}-{run_name}", last, args.push)
     if args.action == "test":
         code = run(_key(), f"{now_kst():%m%d}_test", f"test-{run_name}", now_kst() + timedelta(minutes=args.minutes), 60, args.push, args.full_dir)
         dispatch("check")  # 다음 실행을 요청하는 길도 함께 시험(check 실행이 하나 더 생기면 됨)
