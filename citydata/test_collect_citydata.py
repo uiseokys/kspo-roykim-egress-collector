@@ -67,35 +67,78 @@ class PlanTest(unittest.TestCase):
         for label in cc.SHOWS:  # 두 구간이 겹쳐 빈틈이 없음
             self.assertGreater(segs[f"{label}-A"][1], segs[f"{label}-B"][0])
 
+    def test_segments_leave_no_gap_from_start_to_end(self):
+        # 11/27 14:00부터 11/29 23:00까지: 시간 순서로 놓으면 다음 구간이 앞 구간이 끝나기 전에 시작함
+        spans = list(cc.segments().values())
+        self.assertEqual(spans, sorted(spans, key=lambda span: span[0]))
+        self.assertEqual((spans[0][0], spans[-1][1]), (kst("2026-11-27 14:00"), kst("2026-11-29 23:00")))
+        for (_, last, _), (first, _, _) in zip(spans, spans[1:]):
+            self.assertLess(first, last)
+        now = kst("2026-11-27 14:00")
+        while now < kst("2026-11-29 23:00"):  # 어느 시각에 실행돼도 수집할 구간이 있음
+            self.assertEqual(cc.plan("", now)[0], "collect", now)
+            now += timedelta(minutes=7)
+
     def test_plan_by_time(self):
-        self.assertEqual(cc.plan("", kst("2026-11-27 17:00")), ("idle", ""))  # 아직 이름
+        self.assertEqual(cc.plan("", kst("2026-11-27 13:00")), ("idle", ""))  # 아직 이름
+        self.assertEqual(cc.plan("", kst("2026-11-27 14:20")), ("collect", "1127_조용필-P1"))  # 공연 구간 앞의 빈 시간
         self.assertEqual(cc.plan("", kst("2026-11-27 17:20")), ("collect", "1127_조용필-A"))  # 1시간 전보다 조금 일찍 와도 시작
         self.assertEqual(cc.plan("", kst("2026-11-27 20:00")), ("collect", "1127_조용필-A"))
         self.assertEqual(cc.plan("", kst("2026-11-27 21:00")), ("collect", "1127_조용필-B"))  # 겹치는 때는 늦게 시작하는 구간
-        self.assertEqual(cc.plan("", kst("2026-11-28 00:59")), ("collect", "1127_조용필-B"))
-        self.assertEqual(cc.plan("", kst("2026-11-28 01:00")), ("idle", ""))
+        self.assertEqual(cc.plan("", kst("2026-11-28 00:05")), ("collect", "1127_조용필-B"))
+        self.assertEqual(cc.plan("", kst("2026-11-28 01:00")), ("collect", "1128_조용필-P1"))  # 공연이 끝난 밤도 이어서
+        self.assertEqual(cc.plan("arm", kst("2026-11-28 10:00")), ("collect", "1128_조용필-P3"))
         self.assertEqual(cc.plan("auto", kst("2026-11-29 16:30")), ("collect", "1129_조용필-A"))
         self.assertEqual(cc.plan("check", kst("2026-11-27 20:00")), ("check", ""))
-        # arm: 구간 밖이면 다음 구간을 기다리고, 구간 안이면 바로 수집, 마지막 구간이 끝난 뒤에는 멈춤
+        # arm: 시작 전이면 기다리고, 그 뒤로는 바로 수집, 마지막 구간이 끝난 뒤에는 멈춤
         self.assertEqual(cc.plan("arm", kst("2026-11-26 21:00")), ("wait", ""))
-        self.assertEqual(cc.plan("arm", kst("2026-11-28 03:00")), ("wait", ""))
         self.assertEqual(cc.plan("arm", kst("2026-11-27 17:30")), ("collect", "1127_조용필-A"))
         self.assertEqual(cc.plan("arm", kst("2026-11-29 23:30")), ("idle", ""))
         self.assertEqual(cc.plan("", kst("2026-11-26 21:00")), ("idle", ""))  # 예약 실행은 기다리지 않음
 
-    def test_handoff_keeps_the_day_covered_with_one_start(self):
-        # 앞 구간은 뒤 구간 시작 30분 전에 다음 실행을 요청하고, 그때 고르는 구간이 뒤 구간이어야 함
-        for label in cc.SHOWS:
-            during, after = cc.handoff_for(f"{label}-A", relay=False)
-            self.assertEqual((during[1], after), ("auto", None))
-            self.assertEqual(cc.plan(during[1], during[0] + timedelta(minutes=3)), ("collect", f"{label}-B"))
-            self.assertLess(during[0], cc.segments()[f"{label}-A"][1])
+    def test_handoff_keeps_everything_covered_with_one_start(self):
+        # 모든 구간은 다음 구간 시작 30분 전에 다음 실행을 요청하고, 그때 고르는 구간이 바로 다음 구간이어야 함
+        names = list(cc.segments())
+        for name, following in zip(names, names[1:]):
+            during, after = cc.handoff_for(name, relay=False)
+            self.assertEqual((during[1], after), ("auto", None), name)
+            self.assertEqual(cc.plan(during[1], during[0] + timedelta(minutes=3)), ("collect", following))
+            self.assertLess(during[0], cc.segments()[name][1])
+        self.assertEqual(cc.handoff_for("1127_조용필-P1", relay=False)[0][0], kst("2026-11-27 17:30"))
         self.assertEqual(cc.handoff_for("1127_조용필-A", relay=False)[0][0], kst("2026-11-27 21:00"))
-        # 그날 마지막 구간은 arm일 때만 다음 공연일을 기다리는 실행을 요청하고, 마지막 날에는 멈춤
-        self.assertEqual(cc.handoff_for("1127_조용필-B", relay=False), (None, None))
-        self.assertEqual(cc.handoff_for("1127_조용필-B", relay=True), (None, "arm"))
+        self.assertEqual(cc.handoff_for("1127_조용필-B", relay=False)[0][0], kst("2026-11-28 00:25"))
         self.assertEqual(cc.handoff_for("1127_조용필-A", relay=True)[0][1], "arm")
-        self.assertEqual(cc.handoff_for("1129_조용필-B", relay=True), (None, None))
+        self.assertEqual(cc.handoff_for("1129_조용필-B", relay=True), (None, None))  # 마지막 구간에서 멈춤
+
+    def test_one_start_now_runs_to_the_end_without_a_gap(self):
+        # 14:20에 한 번 시작: 각 실행은 시작한 때부터 구간 끝까지 모으고, 다음 실행은 앞 실행이 끝나기 전에 시작함
+        now, covered_until, picked = kst("2026-11-27 14:20"), None, []
+        while True:
+            mode, name = cc.plan("auto", now)
+            if mode != "collect":
+                break
+            if covered_until is not None:
+                self.assertLess(now, covered_until, name)
+            picked.append(name)
+            covered_until = cc.segments()[name][1]
+            during, _ = cc.handoff_for(name, relay=False)
+            if during is None:
+                break
+            now = during[0] + timedelta(minutes=2)  # 요청한 실행이 2분 뒤에 시작
+        self.assertEqual(picked, list(cc.segments()))
+        self.assertEqual(covered_until, kst("2026-11-29 23:00"))
+
+    def test_scheduled_run_rests_while_another_run_is_active(self):
+        listing = json.dumps([{"databaseId": 1, "status": "completed"}, {"databaseId": 7, "status": "in_progress"}, {"databaseId": 9, "status": "in_progress"}]).encode()
+        with mock.patch.dict(cc.os.environ, {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "9"}), mock.patch.object(cc.subprocess, "run") as called:
+            called.return_value = mock.Mock(stdout=listing)
+            self.assertTrue(cc.others_active())  # 7번이 돌고 있음
+            called.return_value = mock.Mock(stdout=json.dumps([{"databaseId": 9, "status": "in_progress"}]).encode())
+            self.assertFalse(cc.others_active())  # 나 혼자뿐
+            called.return_value = mock.Mock(stdout=b"")
+            self.assertFalse(cc.others_active())  # 확인하지 못하면 수집하는 쪽으로
+        with mock.patch.dict(cc.os.environ, {"GITHUB_ACTIONS": ""}):
+            self.assertFalse(cc.others_active())
 
     def test_wait_chain_reaches_every_window(self):
         # arm을 전날 밤에 눌렀을 때: 5시간씩 기다리며 이어 가도 각 구간이 시작하기 전에 수집을 고름
@@ -110,7 +153,7 @@ class PlanTest(unittest.TestCase):
                 now = during[0] + timedelta(minutes=2) if during else cc.segments()[name][1] + timedelta(minutes=2)
             else:
                 break
-        self.assertEqual([p[0] for p in picked], sorted(cc.segments()))
+        self.assertEqual([p[0] for p in picked], list(cc.segments()))
         self.assertTrue(all(early for name, early in picked if name.endswith("-A")))  # 앞 구간은 공연 1시간 전보다 먼저 시작
         self.assertEqual(cc.plan("test", kst("2026-11-26 15:00")), ("test", ""))
 

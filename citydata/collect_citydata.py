@@ -2,7 +2,8 @@
 
 로이킴 때의 collector.py는 인구만 받았습니다. 이 수집기는 같은 서비스의 전체 항목(citydata)을 받아
 인구·연령대 비율에 더해 지하철·버스 실시간 승하차(최근 5·10·30분), 주차장 현재 대수, 따릉이, 도로 속도, 날씨, 상권 결제를 함께 남깁니다.
-공연 시작 1시간 전부터 시작 6시간 뒤까지 2분 간격으로 조회합니다. 표준 라이브러리만 씁니다.
+2026-11-27 14:00부터 마지막 공연 구간이 끝나는 11-29 23:00까지 끊기지 않고 2분 간격으로 조회합니다. 표준 라이브러리만 씁니다.
+구간은 공연마다 A(시작 1시간 전~3시간 30분 뒤)·B(2시간 30분 뒤~6시간 뒤)와, 그 사이 빈 시간을 메우는 P1·P2…입니다.
 
   python3 citydata/collect_citydata.py plan                       # 지금 시각에 맞는 구간 고르기(Actions용)
   python3 citydata/collect_citydata.py collect --segment 1127_조용필-A --push
@@ -10,8 +11,8 @@
   python3 citydata/collect_citydata.py test --minutes 5 --push    # 짧게 수집해 저장까지 확인
   python3 citydata/collect_citydata.py wait                       # 다음 구간까지 기다렸다가 다음 실행 요청(arm용)
 
-이어 가기: 앞 구간(A)을 수집하는 실행이 뒤 구간(B) 시작 30분 전에 다음 실행을 스스로 요청합니다. 그래서 하루에 한 번만 시작시키면 됩니다.
-Run workflow에서 arm을 고르면 구간 밖에서도 다음 구간까지 기다렸다가 수집하고, 사흘 공연이 끝날 때까지 스스로 이어 갑니다.
+이어 가기: 구간을 수집하는 실행이 다음 구간 시작 30분 전에 다음 실행을 스스로 요청합니다. 구간이 모두 이어져 있어 한 번만 시작시키면 끝까지 갑니다.
+예약 실행은 이어달리기가 끊겼을 때 되살리는 역할만 합니다(다른 실행이 돌고 있으면 쉽니다).
 
 인증키는 환경변수 SEOUL_POPULATION_API_KEY에서만 읽고, 파일이나 로그에 남기지 않습니다.
 
@@ -53,6 +54,10 @@ RELAY_MAX = timedelta(hours=5)  # 대기 작업 하나가 기다리는 최대 �
 # 공연 시작 시각(KST). 구간 A는 시작 1시간 전~시작 3시간 30분 뒤, 구간 B는 시작 2시간 30분 뒤~6시간 뒤(1시간 겹침).
 SHOWS = {"1127_조용필": "2026-11-27 19:00", "1128_조용필": "2026-11-28 18:00", "1129_조용필": "2026-11-29 17:00"}
 PARTS = {"A": (-60, 210), "B": (150, 360)}
+# 공연 구간 사이의 빈 시간도 모읍니다: 이 시각부터 마지막 공연 구간이 끝날 때(11/29 23:00)까지 끊기지 않게 구간을 잇습니다.
+FILL_FROM = "2026-11-27 14:00"
+FILL_STEP = timedelta(hours=4, minutes=30)  # 빈 시간을 메우는 구간 하나의 최대 길이(작업 제한 시간 안에 들게)
+FILL_OVERLAP = timedelta(minutes=5)  # 이웃한 구간과 겹치는 시간
 
 
 def now_kst() -> datetime:
@@ -64,13 +69,34 @@ def log(message: str) -> None:
 
 
 def segments() -> dict[str, tuple[datetime, datetime, str]]:
-    """구간 이름 → (시작, 끝, 공연)."""
-    out = {}
+    """구간 이름 → (시작, 끝, 공연). 시간 순서대로 담습니다.
+    공연 구간(A·B) 앞의 빈 시간은 P1, P2…로 메웁니다. 이웃한 구간은 5분씩 겹쳐, FILL_FROM부터 마지막 구간 끝까지 빈 시간이 없습니다."""
+    out, cursor = {}, datetime.strptime(FILL_FROM, "%Y-%m-%d %H:%M").replace(tzinfo=KST)
     for label, start in SHOWS.items():
         begin = datetime.strptime(start, "%Y-%m-%d %H:%M").replace(tzinfo=KST)
-        for part, (first, last) in PARTS.items():
-            out[f"{label}-{part}"] = (begin + timedelta(minutes=first), begin + timedelta(minutes=last), label)
+        show = {f"{label}-{part}": (begin + timedelta(minutes=first), begin + timedelta(minutes=last), label) for part, (first, last) in PARTS.items()}
+        opening = min(first for first, _, _ in show.values())
+        if cursor < opening:
+            count = -(-(opening - cursor) // FILL_STEP)  # 올림
+            step = (opening - cursor) / count
+            for n in range(count):
+                out[f"{label}-P{n + 1}"] = (cursor + step * n, cursor + step * (n + 1) + FILL_OVERLAP, label)
+        out.update(show)
+        cursor = max(last for _, last, _ in show.values()) - FILL_OVERLAP
     return out
+
+
+def others_active() -> bool:
+    """이 워크플로의 다른 실행이 돌고 있거나 차례를 기다리는지(Actions 안에서만 확인). 알 수 없으면 False."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return False
+    done = subprocess.run(["gh", "run", "list", "--workflow", WORKFLOW, "--limit", "30", "--json", "databaseId,status"], cwd=ROOT, capture_output=True)
+    try:
+        runs = json.loads(done.stdout or b"[]")
+    except ValueError:
+        return False
+    me = os.environ.get("GITHUB_RUN_ID", "")
+    return any(isinstance(r, dict) and r.get("status") != "completed" and str(r.get("databaseId")) != me for r in runs)
 
 
 def upcoming(now: datetime) -> datetime | None:
@@ -362,6 +388,9 @@ def main() -> int:
 
     if args.action == "plan":
         mode, chosen = plan(os.environ.get("RUN_REQUEST", ""), now_kst())
+        if mode == "collect" and os.environ.get("RUN_EVENT") == "schedule" and others_active():
+            log(f"다른 실행이 이미 이어 가고 있어 예약 실행은 쉽니다({chosen})")  # 예약 실행은 이어달리기가 끊겼을 때만 되살리는 역할
+            mode, chosen = "idle", ""
         log(f"이벤트 {os.environ.get('RUN_EVENT', 'local')} · 요청 {os.environ.get('RUN_REQUEST') or '—'} · 할 일 {mode} {chosen}")
         _output(mode=mode, segment=chosen)
         return 0
