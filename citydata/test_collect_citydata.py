@@ -13,10 +13,18 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import collect_citydata as cc  # noqa: E402
 
+REAL_FETCH_PARKING = cc.fetch_parking
+
 HERE = Path(__file__).resolve().parent
 SAMPLE = json.loads((HERE / "sample_citydata.json").read_text(encoding="utf-8"))  # 공개 시험 키로 받은 응답을 줄인 것(광화문·덕수궁)
 WORKFLOW = (HERE.parent / ".github/workflows/collect-citydata.yml").read_text(encoding="utf-8")
 CITY = SAMPLE["CITYDATA"]
+
+
+def setUpModule():  # 시험에서는 운영사 주차 자료를 실제로 부르지 않음
+    patcher = mock.patch.object(cc, "fetch_parking", return_value=2418)
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
 
 
 def kst(text):
@@ -202,6 +210,8 @@ class RunTest(unittest.TestCase):
             self.assertTrue(kept and "LIVE_SUB_PPLTN" in kept[0]["response"] and "EVENT_STTS" not in kept[0]["response"])
             with gzip.open(Path(tmp) / "full/t-A-1.jsonl.gz", "rt", encoding="utf-8") as f:
                 self.assertIn("CITYDATA", json.loads(f.readline())["response"])
+            parked = (Path(tmp) / "data/t/A-1.parking.csv").read_text(encoding="utf-8").splitlines()
+            self.assertEqual((len(parked), parked[1].split(",")[1:]), (len(body.splitlines()), ["2418", "ok"]))  # 주차는 조회마다 한 줄
             # 함께 모으는 장소(잠실 관광특구)는 따로 쌓고, 추린 원본에는 인구·지하철·버스만
             extra_rows = (Path(tmp) / "data/t/A-1.jamsil.csv").read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(extra_rows) - 1, calls["extra"])
@@ -238,14 +248,29 @@ class RunTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(cc, "OUT_DIR", Path(tmp)), mock.patch.object(cc, "ROOT", Path(tmp)), \
                 mock.patch.object(cc, "fetch", side_effect=fake_fetch), mock.patch.object(cc.time, "sleep"), mock.patch.object(cc, "save_to_repo", return_value=True) as saving:
             start = cc.now_kst()
-            ticks = (start + timedelta(minutes=2 * i) for i in range(1000))
+            ticks = (start + timedelta(seconds=20 * i) for i in range(1000))
             with mock.patch.object(cc, "now_kst", side_effect=lambda: next(ticks)):
                 self.assertEqual(cc.run_extra("secret-key", "t", "P1-9", start + timedelta(minutes=40), push=True), 0)
             self.assertEqual(set(seen), set(cc.EXTRA_AREAS))  # 올림픽공원은 조회하지 않음
             self.assertEqual(len((Path(tmp) / "t/P1-9.jamsil.csv").read_text(encoding="utf-8").splitlines()) - 1, len(seen))
             self.assertFalse((Path(tmp) / "t/P1-9.csv").exists())
+            self.assertGreater(len((Path(tmp) / "t/P1-9.parking.csv").read_text(encoding="utf-8").splitlines()) - 1, len(seen))  # 주차는 더 자주
             self.assertIn("진행 중", saving.call_args_list[0].args[1])  # 첫 조회 직후 바로 저장
             self.assertGreaterEqual(saving.call_count, 2)
+
+    def test_parking_count_is_recorded_and_failure_is_only_a_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "x.parking.csv"
+            cc.collect_parking(path, kst("2026-11-27 17:07"))
+            with mock.patch.object(cc, "fetch_parking", side_effect=OSError("down")):
+                cc.collect_parking(path, kst("2026-11-27 17:09"))
+            self.assertEqual(path.read_text(encoding="utf-8").splitlines(),
+                             ["fetched_at_kst,parking_sum,status", "2026-11-27 17:07:00,2418,ok", "2026-11-27 17:09:00,,error: OSError"])
+        reply = mock.MagicMock()
+        reply.__enter__.return_value.read.return_value = b'[{"parking_sum":2418}]'
+        with mock.patch.object(cc.urllib.request, "urlopen", return_value=reply) as opened:
+            self.assertEqual(REAL_FETCH_PARKING(), 2418)
+            self.assertIn("parkingorsApi.do", opened.call_args.args[0].full_url)
 
     def test_empty_response_cannot_count_as_success(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(cc, "OUT_DIR", Path(tmp)), mock.patch.object(cc, "ROOT", Path(tmp)), \

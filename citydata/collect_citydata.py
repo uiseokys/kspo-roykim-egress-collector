@@ -20,6 +20,7 @@
 저장 (citydata/data/<공연>/)
 - <구간>-<실행>.csv    조회마다 한 줄 요약(FIELDS)
 - <구간>-<실행>.jsonl  추린 원본(KEEP 항목만: 주차장별·따릉이 대여소별 값 포함)
+- <구간>-<실행>.parking.csv  올림픽공원 주차장(동2·남2·북2문)에 지금 주차된 대수. 운영사(한국체육산업개발)의 공개 자료, 2분마다
 - <구간>-<실행>.jamsil.csv·.jsonl  '잠실 관광특구'를 5분마다 조회한 것(올림픽공원에는 비어 오는 지하철 실시간 승하차를 얻으려고. 잠실역이 함께 들어 있음)
 - 전체 응답 원본은 한 번에 15만 글자쯤이라 저장소에 넣지 않고 --full-dir 폴더에 gzip으로 둡니다(Actions 아티팩트로 보관).
 """
@@ -171,6 +172,11 @@ DROP_INSIDE = {"FCST_PPLTN"}  # 인구 예측 12개(용량만 큼)
 # 같은 역 네 곳(올림픽공원 5·9, 한성백제, 몽촌토성)에 잠실역(2·8)을 더한 '잠실 관광특구'에는 값이 들어옵니다.
 EXTRA_AREAS = {"잠실 관광특구": "jamsil"}
 EXTRA_EVERY = timedelta(minutes=5)  # 자료가 바뀌는 간격에 맞춰 덜 자주 조회
+# 올림픽공원 주차장의 현재 주차 대수. 서울시 도시데이터에는 이곳 주차장이 실시간 연동되지 않아 비어 옵니다(CUR_PRK_YN이 모두 N).
+# 운영사인 한국체육산업개발이 공공데이터 개방목록에 주소와 키를 함께 공개한 '올림픽공원 실시간 주차현황'(동2·남2·북2문 합)을 씁니다.
+# https://www.ksponco.or.kr/pubData/64?mid=a10106020000 · 공공데이터포털 15168686
+PARKING_URL = "https://www.ksponco.or.kr/online/main/parkingorsApi.do?apiKey=PARKING21803504"
+PARKING_FIELDS = ["fetched_at_kst", "parking_sum", "status"]
 EXTRA_KEEP = ("LIVE_PPLTN_STTS", "LIVE_SUB_PPLTN", "LIVE_BUS_PPLTN")  # 추린 원본에는 인구·지하철·버스만
 
 
@@ -316,6 +322,32 @@ def save_to_repo(paths: list[Path], note: str) -> bool:
     return False
 
 
+def fetch_parking(timeout: int = 20) -> int:
+    """올림픽공원 주차장(동2·남2·북2문)에 지금 주차된 대수."""
+    request = urllib.request.Request(PARKING_URL, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(request, timeout=timeout) as resp:
+        return int(_one(json.loads(resp.read().decode("utf-8")))["parking_sum"])
+
+
+def collect_parking(csv_path: Path, fetched_at: datetime) -> None:
+    """주차 대수를 한 번 조회해 덧붙입니다. 무슨 일이 있어도 예외를 내지 않습니다(올림픽공원 수집을 막지 않게)."""
+    row = {"fetched_at_kst": fetched_at.strftime("%Y-%m-%d %H:%M:%S"), "parking_sum": "", "status": "ok"}
+    try:
+        row["parking_sum"] = fetch_parking()
+    except Exception as exc:
+        row["status"] = f"error: {type(exc).__name__}"
+    try:
+        new_file = not csv_path.exists()
+        with csv_path.open("a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=PARKING_FIELDS)
+            if new_file:
+                writer.writeheader()
+            writer.writerow(row)
+    except OSError as exc:
+        row["status"] = f"기록 실패 ({type(exc).__name__})"
+    log(f"올림픽공원 주차 {row['parking_sum']}대" if row["status"] == "ok" else f"올림픽공원 주차: {row['status']}")
+
+
 def collect_extra(key: str, area: str, csv_path: Path, jsonl_path: Path, fetched_at: datetime) -> None:
     """함께 모으는 장소 하나를 한 번 조회해 덧붙입니다. 무슨 일이 있어도 예외를 내지 않습니다(올림픽공원 수집을 막지 않게)."""
     row = {field: "" for field in FIELDS}
@@ -345,7 +377,8 @@ def run(key: str, label: str, name: str, until: datetime, interval: int = INTERV
     folder.mkdir(parents=True, exist_ok=True)
     csv_path, jsonl_path = folder / f"{name}.csv", folder / f"{name}.jsonl"
     extras = {area: (folder / f"{name}.{tag}.csv", folder / f"{name}.{tag}.jsonl") for area, tag in EXTRA_AREAS.items()}
-    files, next_extra = [csv_path, jsonl_path, *(p for pair in extras.values() for p in pair)], now_kst()
+    parking_path = folder / f"{name}.parking.csv"
+    files, next_extra = [csv_path, jsonl_path, parking_path, *(p for pair in extras.values() for p in pair)], now_kst()
     full_path = None
     if full_dir is not None:
         full_dir.mkdir(parents=True, exist_ok=True)
@@ -377,6 +410,7 @@ def run(key: str, label: str, name: str, until: datetime, interval: int = INTERV
             fail += 1
             log(row["status"])
         append_csv(csv_path, row)
+        collect_parking(parking_path, now_kst())
         if extras and fetched_at >= next_extra:
             next_extra = fetched_at + EXTRA_EVERY
             for area, (extra_csv, extra_jsonl) in extras.items():
@@ -396,26 +430,31 @@ def run(key: str, label: str, name: str, until: datetime, interval: int = INTERV
 
 
 def run_extra(key: str, label: str, name: str, until: datetime, push: bool = False) -> int:
-    """함께 모으는 장소(EXTRA_AREAS)만 until까지 EXTRA_EVERY마다 조회합니다. 올림픽공원 수집과 따로 도는 실행용입니다.
-    파일 이름은 본 수집과 같은 꼴(<name>.<말>.csv·.jsonl)이고, 첫 조회 직후와 그 뒤 SAVE_EVERY마다 저장소에 올립니다."""
+    """올림픽공원 본 수집과 따로 도는 실행용: 주차 대수(INTERVAL마다)와 함께 모으는 장소(EXTRA_AREAS, EXTRA_EVERY마다)만 until까지 모읍니다.
+    파일 이름은 본 수집과 같은 꼴(<name>.parking.csv, <name>.<말>.csv·.jsonl)이고, 첫 조회 직후와 그 뒤 SAVE_EVERY마다 저장소에 올립니다."""
     folder = OUT_DIR / label
     folder.mkdir(parents=True, exist_ok=True)
     extras = {area: (folder / f"{name}.{tag}.csv", folder / f"{name}.{tag}.jsonl") for area, tag in EXTRA_AREAS.items()}
-    files = [p for pair in extras.values() for p in pair]
-    log(f"따로 수집 시작: {', '.join(extras)} (끝 {until:%m/%d %H:%M}, 간격 {int(EXTRA_EVERY.total_seconds())}초)")
-    saved, last_save = True, None
+    parking_path = folder / f"{name}.parking.csv"
+    files = [parking_path, *(p for pair in extras.values() for p in pair)]
+    log(f"따로 수집 시작: 주차, {', '.join(extras)} (끝 {until:%m/%d %H:%M})")
+    saved, last_save, next_extra = True, None, now_kst()
     while now_kst() < until:
-        for area, (extra_csv, extra_jsonl) in extras.items():
-            collect_extra(key, area, extra_csv, extra_jsonl, now_kst())
+        fetched_at = now_kst()
+        collect_parking(parking_path, fetched_at)
+        if fetched_at >= next_extra:
+            next_extra = fetched_at + EXTRA_EVERY
+            for area, (extra_csv, extra_jsonl) in extras.items():
+                collect_extra(key, area, extra_csv, extra_jsonl, now_kst())
         if push and (last_save is None or now_kst() - last_save >= SAVE_EVERY):
-            saved = save_to_repo(files, f"수집: {label} {name} 잠실 관광특구 (진행 중)")
+            saved = save_to_repo(files, f"수집: {label} {name} 주차·잠실 관광특구 (진행 중)")
             last_save = now_kst()
         remaining = (until - now_kst()).total_seconds()
         if remaining <= 0:
             break
-        time.sleep(min(EXTRA_EVERY.total_seconds(), remaining))
+        time.sleep(min(INTERVAL, remaining))
     if push:
-        saved = save_to_repo(files, f"수집: {label} {name} 잠실 관광특구")
+        saved = save_to_repo(files, f"수집: {label} {name} 주차·잠실 관광특구")
         log("저장소에 올림" if saved else "저장소에 올리지 못함")
     return 0 if saved and any(p.is_file() for p in files) else 1
 
