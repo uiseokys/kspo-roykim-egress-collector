@@ -175,7 +175,10 @@ class RunTest(unittest.TestCase):
     def test_run_writes_files_and_survives_errors(self):
         calls = {"n": 0}
 
-        def fake_fetch(key):
+        def fake_fetch(key, area=cc.AREA, **options):
+            if area != cc.AREA:  # 함께 모으는 장소
+                calls["extra"] = calls.get("extra", 0) + 1
+                return SAMPLE
             calls["n"] += 1
             if calls["n"] == 2:
                 raise RuntimeError("HTTP 500")
@@ -199,6 +202,30 @@ class RunTest(unittest.TestCase):
             self.assertTrue(kept and "LIVE_SUB_PPLTN" in kept[0]["response"] and "EVENT_STTS" not in kept[0]["response"])
             with gzip.open(Path(tmp) / "full/t-A-1.jsonl.gz", "rt", encoding="utf-8") as f:
                 self.assertIn("CITYDATA", json.loads(f.readline())["response"])
+            # 함께 모으는 장소(잠실 관광특구)는 따로 쌓고, 추린 원본에는 인구·지하철·버스만
+            extra_rows = (Path(tmp) / "data/t/A-1.jamsil.csv").read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(extra_rows) - 1, calls["extra"])
+            self.assertLess(calls["extra"], calls["n"])  # 5분 간격이라 올림픽공원보다 덜 자주
+            extra = json.loads((Path(tmp) / "data/t/A-1.jamsil.jsonl").read_text(encoding="utf-8").splitlines()[0])["response"]
+            self.assertTrue("LIVE_SUB_PPLTN" in extra and "SBIKE_STTS" not in extra and "PRK_STTS" not in extra)
+
+    def test_extra_area_failure_never_stops_the_main_collection(self):
+        def fake_fetch(key, area=cc.AREA, **options):
+            if area != cc.AREA:
+                raise RuntimeError("HTTP 500")
+            return SAMPLE
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(cc, "OUT_DIR", Path(tmp)), mock.patch.object(cc, "ROOT", Path(tmp)), \
+                mock.patch.object(cc, "fetch", side_effect=fake_fetch), mock.patch.object(cc.time, "sleep"):
+            start = cc.now_kst()
+            ticks = (start + timedelta(seconds=5 * i) for i in range(1000))
+            with mock.patch.object(cc, "now_kst", side_effect=lambda: next(ticks)):
+                self.assertEqual(cc.run("secret-key", "t", "x", start + timedelta(minutes=2), 30), 0)
+            self.assertNotIn("error", (Path(tmp) / "t/x.csv").read_text(encoding="utf-8"))
+            body = (Path(tmp) / "t/x.jamsil.csv").read_text(encoding="utf-8")
+            self.assertIn("error: RuntimeError", body)
+            self.assertNotIn("secret-key", body)
+            self.assertFalse((Path(tmp) / "t/x.jamsil.jsonl").exists())
 
     def test_empty_response_cannot_count_as_success(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(cc, "OUT_DIR", Path(tmp)), mock.patch.object(cc, "ROOT", Path(tmp)), \

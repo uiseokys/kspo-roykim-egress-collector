@@ -19,6 +19,7 @@
 저장 (citydata/data/<공연>/)
 - <구간>-<실행>.csv    조회마다 한 줄 요약(FIELDS)
 - <구간>-<실행>.jsonl  추린 원본(KEEP 항목만: 주차장별·따릉이 대여소별 값 포함)
+- <구간>-<실행>.jamsil.csv·.jsonl  '잠실 관광특구'를 5분마다 조회한 것(올림픽공원에는 비어 오는 지하철 실시간 승하차를 얻으려고. 잠실역이 함께 들어 있음)
 - 전체 응답 원본은 한 번에 15만 글자쯤이라 저장소에 넣지 않고 --full-dir 폴더에 gzip으로 둡니다(Actions 아티팩트로 보관).
 """
 
@@ -165,6 +166,11 @@ KEEP = {
     "LIVE_CMRCL_STTS": None,
 }
 DROP_INSIDE = {"FCST_PPLTN"}  # 인구 예측 12개(용량만 큼)
+# 함께 모으는 장소 → 파일 이름에 붙일 말. 올림픽공원은 지하철 실시간 승하차가 비어 오지만(2026-11-27 확인),
+# 같은 역 네 곳(올림픽공원 5·9, 한성백제, 몽촌토성)에 잠실역(2·8)을 더한 '잠실 관광특구'에는 값이 들어옵니다.
+EXTRA_AREAS = {"잠실 관광특구": "jamsil"}
+EXTRA_EVERY = timedelta(minutes=5)  # 자료가 바뀌는 간격에 맞춰 덜 자주 조회
+EXTRA_KEEP = ("LIVE_PPLTN_STTS", "LIVE_SUB_PPLTN", "LIVE_BUS_PPLTN")  # 추린 원본에는 인구·지하철·버스만
 
 
 def fetch(key: str, area: str = AREA, timeout: int = 30, retries: int = 3) -> dict:
@@ -248,12 +254,12 @@ def to_row(data: dict, fetched_at: datetime) -> dict:
     return row
 
 
-def trim(data: dict) -> dict:
-    """저장소에 넣을 만큼만 추린 원본: KEEP에 적은 항목과 열만 남깁니다."""
+def trim(data: dict, only: tuple[str, ...] | None = None) -> dict:
+    """저장소에 넣을 만큼만 추린 원본: KEEP에 적은 항목과 열만 남깁니다. only를 주면 그 항목만."""
     city, out = _city(data), {}
     for section, columns in KEEP.items():
         value = city.get(section)
-        if value in (None, [], {}):
+        if value in (None, [], {}) or (only is not None and section not in only):
             continue
 
         def pick(item, columns=columns):
@@ -309,13 +315,36 @@ def save_to_repo(paths: list[Path], note: str) -> bool:
     return False
 
 
+def collect_extra(key: str, area: str, csv_path: Path, jsonl_path: Path, fetched_at: datetime) -> None:
+    """함께 모으는 장소 하나를 한 번 조회해 덧붙입니다. 무슨 일이 있어도 예외를 내지 않습니다(올림픽공원 수집을 막지 않게)."""
+    row = {field: "" for field in FIELDS}
+    row["fetched_at_kst"] = fetched_at.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        data = fetch(key, area, retries=1)
+        row = to_row(data, fetched_at)
+        if row["status"] == "ok":
+            append_jsonl(jsonl_path, fetched_at, trim(data, EXTRA_KEEP))
+        ride = "없음" if row["sub_on_5_min"] in ("", None) else f"승차 {row['sub_on_5_min']}~{row['sub_on_5_max']} 하차 {row['sub_off_5_min']}~{row['sub_off_5_max']}"
+        log(f"{area}: {row['status']} · 지하철 5분 {ride} · 인구 {row['ppltn_min'] or '없음'}~{row['ppltn_max']}")
+    except Exception as exc:  # 오류 문구에는 키가 없습니다(fetch 참고)
+        row["status"] = f"error: {type(exc).__name__}"
+        log(f"{area}: {row['status']}")
+    try:
+        append_csv(csv_path, row)
+    except OSError as exc:
+        log(f"{area}: 기록 실패 ({type(exc).__name__})")
+
+
 def run(key: str, label: str, name: str, until: datetime, interval: int = INTERVAL, push: bool = False, full_dir: Path | None = None,
         handoff: tuple[datetime, str] | None = None) -> int:
     """until까지 interval초마다 조회해 OUT_DIR/<label>/<name>.csv·.jsonl에 쌓습니다. 성공한 조회가 있고 저장도 됐으면 0.
-    handoff (시각, 요청)를 주면 그 시각이 됐을 때 다음 실행을 한 번 요청합니다."""
+    handoff (시각, 요청)를 주면 그 시각이 됐을 때 다음 실행을 한 번 요청합니다.
+    EXTRA_AREAS의 장소는 EXTRA_EVERY마다 조회해 <name>.<말>.csv·.jsonl에 따로 쌓습니다(성공·실패는 반환값에 넣지 않음)."""
     folder = OUT_DIR / label
     folder.mkdir(parents=True, exist_ok=True)
     csv_path, jsonl_path = folder / f"{name}.csv", folder / f"{name}.jsonl"
+    extras = {area: (folder / f"{name}.{tag}.csv", folder / f"{name}.{tag}.jsonl") for area, tag in EXTRA_AREAS.items()}
+    files, next_extra = [csv_path, jsonl_path, *(p for pair in extras.values() for p in pair)], now_kst()
     full_path = None
     if full_dir is not None:
         full_dir.mkdir(parents=True, exist_ok=True)
@@ -347,15 +376,19 @@ def run(key: str, label: str, name: str, until: datetime, interval: int = INTERV
             fail += 1
             log(row["status"])
         append_csv(csv_path, row)
+        if extras and fetched_at >= next_extra:
+            next_extra = fetched_at + EXTRA_EVERY
+            for area, (extra_csv, extra_jsonl) in extras.items():
+                collect_extra(key, area, extra_csv, extra_jsonl, now_kst())
         if push and now_kst() - last_save >= SAVE_EVERY:
-            saved = save_to_repo([csv_path, jsonl_path], f"수집: {label} {name} (진행 중)")
+            saved = save_to_repo(files, f"수집: {label} {name} (진행 중)")
             last_save = now_kst()
         remaining = (until - now_kst()).total_seconds()
         if remaining <= 0:
             break
         time.sleep(min(interval, remaining))
     if push:
-        saved = save_to_repo([csv_path, jsonl_path], f"수집: {label} {name}")
+        saved = save_to_repo(files, f"수집: {label} {name}")
         log("저장소에 올림" if saved else "저장소에 올리지 못함(아티팩트에는 남음)")
     log(f"수집 종료: 성공 {ok}회, 실패 {fail}회 → {csv_path.relative_to(ROOT)}")
     return 0 if ok > 0 and saved else 1
